@@ -1,0 +1,191 @@
+{
+  "name": "Assistente de Investimentos - RPA + N8N",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "receber-clientes",
+        "options": {}
+      },
+      "id": "1a2b3c4d-0001-4000-8000-000000000001",
+      "name": "Webhook (Entrada)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "assistente-investimentos-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza a entrada enviada pelo script Python\nconst input = $input.first().json;\nlet lista = [];\n\nif (Array.isArray(input.body)) {\n  lista = input.body;\n} else if (input.body && Array.isArray(input.body.clientes)) {\n  lista = input.body.clientes;\n} else if (Array.isArray(input.clientes)) {\n  lista = input.clientes;\n} else if (input.body && typeof input.body === 'object') {\n  lista = [input.body];\n} else {\n  lista = [input];\n}\n\nreturn lista.map(c => {\n  const perfilRaw = (c.perfil || c.Perfil || c.profile || '').toString().trim();\n  return {\n    json: {\n      nome: c.nome || c.Nome || c.name || 'Cliente',\n      email: c.email || c.Email || '',\n      saldo: c.saldo || c.Saldo || '0,00',\n      perfil: perfilRaw,\n      perfil_chave: perfilRaw.toLowerCase()\n    }\n  };\n});"
+      },
+      "id": "1a2b3c4d-0002-4000-8000-000000000002",
+      "name": "Separar e Padronizar Clientes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://chatmasterking.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "1a2b3c4d-0003-4000-8000-000000000003",
+      "name": "Buscar Investimentos (CSV)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        420
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      },
+      "id": "1a2b3c4d-0004-4000-8000-000000000004",
+      "name": "Extrair Dados do CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        700,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Padroniza as colunas do CSV para o cruzamento (Merge)\nreturn $input.all().map(item => {\n  const row = item.json;\n  const keys = Object.keys(row);\n  \n  const perfilKey = keys.find(k => k.toLowerCase().includes('perfil') || k.toLowerCase().includes('profile')) || keys[0];\n  const prodKey = keys.find(k => k !== perfilKey) || keys[1];\n\n  const perfilVal = (row[perfilKey] || '').toString().trim();\n\n  return {\n    json: {\n      ...row,\n      perfil_csv: perfilVal,\n      perfil_chave: perfilVal.toLowerCase(),\n      recomendacao_csv: row[prodKey] || ''\n    }\n  };\n});"
+      },
+      "id": "1a2b3c4d-0005-4000-8000-000000000005",
+      "name": "Padronizar CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "FieldsToMatch": {
+          "values": [
+            {
+              "field1": "perfil_chave",
+              "field2": "perfil_chave"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1a2b3c4d-0006-4000-8000-000000000006",
+      "name": "Cruzar Dados (Clientes x Investimentos)",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const d = item.json;\n  const nome = d.nome || 'Cliente';\n  const saldo = d.saldo || '0,00';\n  const perfil = d.perfil || 'Investidor';\n  const produto = d.recomendacao_csv || d.produto || d.investimento || d.opcoes || 'Carteira Recomendada';\n\n  let mensagem = '';\n  const pLower = perfil.toLowerCase();\n\n  if (pLower.includes('conservador')) {\n    mensagem = `Olá, ${nome}! Analisamos o seu perfil Conservador e seu saldo disponível de R$ ${saldo}. Para garantir a máxima segurança e liquidez do seu patrimônio, nossa recomendação de renda fixa é: ${produto}.`;\n  } else if (pLower.includes('moderado')) {\n    mensagem = `Olá, ${nome}! Com base no seu perfil Moderado e saldo de R$ ${saldo}, o ideal é buscar um equilíbrio estratégico entre segurança e rentabilidade. Recomendamos para você: ${produto}.`;\n  } else if (pLower.includes('arrojado') || pLower.includes('agressivo')) {\n    mensagem = `Olá, ${nome}! Vimos que seu perfil é Arrojado e você conta com R$ ${saldo} disponíveis. Para potencializar seus ganhos no longo prazo com maior foco em retorno, destacamos: ${produto}.`;\n  } else {\n    mensagem = `Olá, ${nome}! Para o seu perfil (${perfil}) e saldo de R$ ${saldo}, nossa recomendação personalizada de investimento é: ${produto}.`;\n  }\n\n  return {\n    json: {\n      nome,\n      email: d.email,\n      perfil,\n      saldo,\n      produto_recomendado: produto,\n      mensagem_personalizada: mensagem\n    }\n  };\n});"
+      },
+      "id": "1a2b3c4d-0007-4000-8000-000000000007",
+      "name": "Gerar Mensagem Personalizada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Entrada)": {
+      "main": [
+        [
+          {
+            "node": "Separar e Padronizar Clientes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar Investimentos (CSV)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar e Padronizar Clientes": {
+      "main": [
+        [
+          {
+            "node": "Cruzar Dados (Clientes x Investimentos)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Investimentos (CSV)": {
+      "main": [
+        [
+          {
+            "node": "Extrair Dados do CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Dados do CSV": {
+      "main": [
+        [
+          {
+            "node": "Padronizar CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Padronizar CSV": {
+      "main": [
+        [
+          {
+            "node": "Cruzar Dados (Clientes x Investimentos)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Cruzar Dados (Clientes x Investimentos)": {
+      "main": [
+        [
+          {
+            "node": "Gerar Mensagem Personalizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
